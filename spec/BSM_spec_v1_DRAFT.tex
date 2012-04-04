@@ -1,0 +1,240 @@
+\documentclass{article}
+
+\usepackage{fmtcount}
+
+\newcounter{filebytecounter}
+\newenvironment{filestruct}[1]{
+	\setcounter{filebytecounter}{0}
+	\begin{center}
+	\begin{tabular*}{0.85\textwidth}{r|l|l}
+	\multicolumn{3}{l}{\textbf{#1}}\\
+	\hline
+}{
+	\hline
+	\multicolumn{3}{l}{\decimal{filebytecounter} bytes}\\
+	\hline
+	\end{tabular*}
+	\end{center}
+}
+\newcommand{\fileitem}[3]{
+	\texttt{0x\padzeroes[2]\Hexadecimal{filebytecounter}}\addtocounter{filebytecounter}{#1} & \texttt{#2} & {#3} \\
+}
+
+\title{The Binary Static Mesh format (.BSM) Version 1 DRAFT}
+\author{zvxryb@gmail.com}
+
+\begin{document}
+\maketitle
+\begin{center}
+	THIS DOCUMENT AND THE FORMAT IT DESCRIBES ARE NOT YET FINALIZED
+\end{center}
+
+\section{Rationale:}
+
+The vast majority of modern model formats are designed primarily to act as generic interchange formats between modelling suites and do not accommodate the needs of modern computer games.  For example, the Wavefront OBJ format, which is nearly-ubiquitous as a static mesh format, has the following problems:
+\begin{enumerate}
+	\item It does not natively support per-vertex tangent-space attributes
+	\item Vertex coordinates, UV coordinates, and normals do not necessarily have a one-to-one mapping (when they are provided)
+	\item Use of smoothing groups rather than a fixed, pre-determined and optimized list of primitives
+\end{enumerate}
+This means that a Wavefront OBJ loader must, at minimum:
+\begin{enumerate}
+	\item Emit an entirely new list of vertex attributes with the one-to-one mapping required by modern graphics APIs.
+	\item Fill in missing vertex attributes.
+	\item Calculate per-vertex tangent space bases.
+	\item Split primitives along mirrored UVs, where tangent-space orientation changes abruptly.
+	\item Split primitives between smoothing groups.
+	\item Sort primitives into groups based on their material.
+	\item Optimize the resulting mesh.
+\end{enumerate}
+
+While OBJ is addressed specifically, many of these issues are typical of other common formats.  By offloading these tasks to export scripts for modelling suites, or to external converters/compilers, we can simplify the process of importing models and rely on a few well-tested tools instead of forcing game developers to choose between developing their own importers or using a bulky import library to do the work for them (which clumsily attempt to reconcile the inherent structural differences between formats, with mixed results).  It is also considerably more likely that an export script will have the necessary mesh-processing facilities at its disposal, whereas an importer into a typical application would have to provide these routines for importing, specifically.
+
+In designing a format which is constrained to only those features which are relevant to every-day game design, we aim to create a static mesh format which may be readily imported into any modern renderer with minimal parsing and processing.
+
+{\tiny (Also, COLLADA.  Lol.)}
+
+\section{Guiding design principles:}
+
+Our goal is to have one unifying static mesh format that any casual programmer can comprehend in its entirety and integrate in an afternoon;  In short, the mesh analog of the ubiquitous TGA raster graphics format.  It is also designed to compliment the IQM dynamic model format, and is partially inspired by its design.
+
+BSM is designed to be simple and straightforward.  It a raw binary representation of mesh data.  It does not attempt to support every feature and format available, but defines one single, consistent format.  Where the core features are insufficient, a flexible extension mechanism is provided which enables users to add auxiliary data while still complying with the core specification.
+
+Numerical data is represented using 32-bit integers and floating-point values, such that endianness conversions, where necessary, can be performed in 4-byte chunks on most structures without knowledge of the layout of the structure (the necessary exception to this rule is the material name string in the \texttt{mesh} structure).  Use of structures with four-byte components also simplifies packing and alignment rules on common platforms.
+
+
+\section{Features:}
+\subsection{Current:}
+\begin{enumerate}
+	\item Simple bounding geometry (bbox/bsphere)
+	\item Typical vertex attributes for modern static meshes:
+	\begin{enumerate}
+		\item World-space coordinates
+		\item Texture coordinates
+		\item Normal vectors
+		\item Tangent vectors
+	\end{enumerate}
+	\item Multiple meshes with unique material identifiers
+	\item Multiple convex hulls for collision detection and physics simulation
+	\item Occlusion mesh for dynamic visibility
+\end{enumerate}
+
+\subsection{Maybe in the future:}
+\begin{enumerate}
+	\item More sophisticated bounding geometry
+	\begin{enumerate}
+		\item Oriented bounding boxes
+		\item Convex hull
+		\item Per-mesh bounding geometry
+	\end{enumerate}
+	\item Triangle adjacency data.
+\end{enumerate}
+
+\subsection{Probably never:}
+\begin{enumerate}
+	\item Animation -- Try IQM for dynamic models, it's pretty good.
+	\item Complex physical attributes or materials -- This is better left to a dedicated material fomat.
+	\item Entities such as cameras, lights, etc. -- This is better left to a dedicated map or scene graph format.
+	\item `Optional' fields and attributes -- Users should know what to expect from a BSM model of any given version/extension.
+	\item Compression -- This is unnecessary because meshes tend to be relatively small and it is common for game assets to be packaged in a compressed archive.  In cases where you absolutely need compression, you may use external compression utilities (.bsm.bz2!)
+	\item Anything uncommon or excessively complex.
+\end{enumerate}
+
+\section{Maintenance}
+This is a public-domain format, which I hope will be community-maintained.  For most people, an extension should be sufficient.  Popular features may be adopted for inclusion in the core format.  I'll keep track of changes, if you're interested in updating the format, send me an email at zvxryb@gmail.com.\\\relax
+[link to forum or IRC channel or some such thing?]
+
+\section{Extension/derivative guidelines:}
+Individuals may extend the format to include other attributes, and still use the BSM magic number and extension, provided that:
+\begin{enumerate}
+	\item The version number must match the version number of the core format which it extends.
+	\item The extension ID may be any number which uniquely identifies your extended format, other than zero.  Extension IDs of zero are reserved exclusively for the core format.
+	\item The format should be backwards-compatible with the core format which it modifies.  This means that all extensions of the version 1 format should include a \textit{full version 1 header} and all of the other required fields.  Your extended format may include additional `extension header' or `secondary header' which follows the full version 1 header.
+\end{enumerate}
+
+All versions of the core format must be backwards-compatible in the same manner as any other extension, such that a BSM loader written for version 1 of the format can extract all of the version 1 properties from a version 1, 2, 3, ..., n file.
+
+\section{THE FORMAT}
+
+\begin{enumerate}
+	\item Data is stored in contiguous arrays, at locations specified within the header.  Byte offsets are relative to the start of the file.
+	\item All values are stored in little-endian byte order.
+	\item ``Float", where it appears, refers to 32-bit single-precision IEEE 754 floating-point values.
+	\item Byte offsets and item counts should always be $\geq 0$.
+	\item Magic number:
+	\begin{enumerate}
+		\item As an ASCII string: \texttt{"BINARYSTATICMESH"}
+		\item As 32-bit integers: \texttt{0x414E4942, 0x54535952, 0x43495441, 0x4853454D} (little-endian)
+	\end{enumerate}
+\end{enumerate}
+
+\subsection{Header:}
+\begin{filestruct}{Header}
+	\fileitem{16}{\hbox{char[16]}}{MAGIC NUMBER}
+    \fileitem{4}{int32}{Version}
+    \fileitem{4}{int32}{Extension ID}
+    \fileitem{16}{bsphere}{Bounding sphere}
+	\fileitem{24}{bbox}{Bounding box}
+    \fileitem{4}{int32}{Number of vertices}
+    \fileitem{4}{int32}{Byte offset of world coordinate array}
+    \fileitem{4}{int32}{Byte offset of texture coordinate array}
+    \fileitem{4}{int32}{Byte offset of normal vector array}
+    \fileitem{4}{int32}{Byte offset of tangent vector array}
+    \fileitem{4}{int32}{Number of triangles}
+    \fileitem{4}{int32}{Byte offset of triangle vector array}
+    \fileitem{4}{int32}{Number of meshes}
+    \fileitem{4}{int32}{Byte offset of mesh array}
+    \fileitem{4}{int32}{Number of collision vertices}
+    \fileitem{4}{int32}{Byte offset of collision vertex array}
+    \fileitem{4}{int32}{Number of convex hulls}
+    \fileitem{4}{int32}{Byte offset of convex hull array}
+    \fileitem{4}{int32}{Number of occlusion mesh vertices}
+    \fileitem{4}{int32}{Byte offset of occlusion mesh vertex array}
+    \fileitem{4}{int32}{Number of occlusion mesh triangles}
+    \fileitem{4}{int32}{Byte offset of occlusion mesh triangle array}
+\end{filestruct}
+
+\begin{filestruct}{Bounding Sphere (bsphere)}
+	\fileitem{4}{float}{X}
+	\fileitem{4}{float}{Y}
+	\fileitem{4}{float}{Z}
+	\fileitem{4}{float}{Radius}
+\end{filestruct}
+
+\begin{filestruct}{Bounding Box (bbox)}
+	\fileitem{4}{float}{Min. X}
+	\fileitem{4}{float}{Min. Y}
+	\fileitem{4}{float}{Min. Z}
+	\fileitem{4}{float}{Max. X}
+	\fileitem{4}{float}{Max. Y}
+	\fileitem{4}{float}{Max. Z}
+\end{filestruct}
+
+\subsection{Vertex Attributes:}
+\begin{filestruct}{World Coordinate}
+	\fileitem{4}{float}{X}
+	\fileitem{4}{float}{Y}
+	\fileitem{4}{float}{Z}
+\end{filestruct}
+
+\begin{filestruct}{Texture Coordinate}
+	\fileitem{4}{float}{U}
+	\fileitem{4}{float}{V}
+\end{filestruct}
+
+\begin{filestruct}{Normal Vector}
+	\fileitem{4}{float}{X}
+	\fileitem{4}{float}{Y}
+	\fileitem{4}{float}{Z}
+\end{filestruct}
+
+\begin{filestruct}{Tangent Vector}
+	\fileitem{4}{float}{X}
+	\fileitem{4}{float}{Y}
+	\fileitem{4}{float}{Z}
+	\fileitem{4}{float}{Tangent-space handedness}
+\end{filestruct}
+\begin{center}
+	(handedness should be $1.0$ if $\vec{N} \times \vec{T} = \vec{B}$ or $-1.0$ if $\vec{N} \times \vec{T} = -\vec{B}$)
+\end{center}
+\vspace{12pt}
+The tangent, bitangent, and normal of a given vertex are unit-length basis vectors for an orthogonal tangent space.  Tangent and bi-tangent are defined with respect to the u- and v- texture-space coordinates.  Bi-tangent is not explicitly stored, but may be recovered from the normal and tangent vectors.  The normal and tangent vectors are \textit{required to be normalized} before they are written to disk.  A compliant BSM reader is not required to re-normalize normal or tangent vectors, however it  may be done in order to support files from non-compliant writers.
+
+\subsection{Meshes:}
+\begin{filestruct}{Triangle}
+	\fileitem{12}{int32[3]}{Three vertex indices}
+\end{filestruct}
+Triangles are represented with counter-clockwise winding.
+
+\begin{filestruct}{Mesh}
+	\fileitem{4}{int32}{Index of first triangle in mesh}
+	\fileitem{4}{int32}{Number of triangles in mesh}
+	\fileitem{256}{char[256]}{Material name string (UTF-8, null-terminated)}
+\end{filestruct}
+
+\subsection{Collision:}
+\begin{filestruct}{Convex Hull Vertex}
+	\fileitem{4}{float}{X}
+	\fileitem{4}{float}{Y}
+	\fileitem{4}{float}{Z}
+\end{filestruct}
+
+\begin{filestruct}{Convex Hull}
+	\fileitem{4}{int32}{Index of first collision vertex in convex hull}
+	\fileitem{4}{int32}{Number of collision vertices in convex hull}
+\end{filestruct}
+
+\subsection{Occlusion Geometry:}
+A single low-resolution occlusion mesh which may be drawn to a depth buffer and tested against.
+
+\begin{filestruct}{Occlusion Mesh Vertex}
+	\fileitem{4}{float}{X}
+	\fileitem{4}{float}{Y}
+	\fileitem{4}{float}{Z}
+\end{filestruct}
+
+\begin{filestruct}{Occlusion Mesh Triangle}
+	\fileitem{12}{int32[3]}{Three vertex indices}
+\end{filestruct}
+
+\end{document}
